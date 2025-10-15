@@ -92,26 +92,43 @@ ingredients = {
 "frozen vegetables": {"price": 2.99, "weight": 750, "kcal": 50}
 }
 
-recipes = [ {
+recipes = [
+    {
         "name": "Spaghetti Bolognese",
         "servings": 4,
-        "ingredients": {
-            "pasta": 500,
-            "ground beef": 300,
-            "onion": 1,
-            "tomatoes": 3
-        }
+        "ingredients": {"pasta": 500, "ground beef": 300, "onion": 1, "tomatoes": 3},
     },
     {
         "name": "Pasta Alfredo",
         "servings": 4,
-        "ingredients": {
-            "pasta": 500,
-            "butter": 50,
-            "cheese": 100,
-            "milk": 200
-        }
-    }]
+        "ingredients": {"pasta": 500, "butter": 50, "cheese": 100, "milk": 200},
+    },
+    {
+        "name": "Omelette",
+        "servings": 2,
+        "ingredients": {"eggs": 3, "cheese": 20, "milk": 30},
+    },
+    {
+        "name": "Chicken Salad",
+        "servings": 2,
+        "ingredients": {"chicken breast": 200, "lettuce": 100, "tomatoes": 50},
+    },
+    {
+        "name": "Veggie Stirfry",
+        "servings": 2,
+        "ingredients": {"rice": 200, "broccoli": 100, "carrots": 100, "garlic": 5},
+    },
+    {
+        "name": "Bean Stew",
+        "servings": 4,
+        "ingredients": {"beans": 200, "lentils": 100, "onion": 50, "tomatoes": 100},
+    },
+    {
+        "name": "Salmon with Potatoes",
+        "servings": 2,
+        "ingredients": {"salmon": 200, "potatoes": 300, "lemon": 10},
+    },
+]
 
 stock = [{}]
 
@@ -131,41 +148,209 @@ def cost_per_recipe(recipe, ingredients):
     return  total
 
 def plan_weekly_meals(recipes, ingredients, stock, weekly_budget):
-    """plant 3 Mahlzeiten am Tag für die Woche."""
+    """plant 3 Mahlzeiten am Tag für die Woche.
+
+    Uses a dynamic scoring function that penalizes recipes already used on multiple days
+    and a lightweight backtracking pass to replace overused recipes when possible.
+    """
     plan = []
     budget_left = weekly_budget
 
-    #sortiert pro portion (günstig -> teuer)
-    recipes_sorted = sorted(recipes, key=lambda r: cost_per_recipe(r, ingredients))
+    from collections import defaultdict
+    usage_days = defaultdict(set)  # recipe name -> set of day indices
+
+    # dynamic selection: before each meal, compute a score = cost + penalty*used_days
+    PENALTY_PER_USED_DAY = 0.5
 
     for day in range(7):
         day_meals = []
         proteins_added = 0
+
         for meal in range(3):
-            for recipe in recipes_sorted:
-                cost = cost_per_recipe(recipe, ingredients)
-                if cost <= budget_left:
-                   #eiweißquelle: min 1 pro Tag
-                    if proteins_added < 1 and is_protein(recipe):
-                        day_meals.append(recipe)
-                        budget_left -= cost
-                        proteins_added += 1
+            # build candidates dynamically with score
+            def score_fn(r):
+                c = cost_per_recipe(r, ingredients)
+                used = len(usage_days[r["name"]])
+                return c + PENALTY_PER_USED_DAY * used
+
+            candidates = sorted(recipes, key=score_fn)
+
+            selected = None
+
+            # first try to find a protein if needed
+            if proteins_added < 1:
+                for recipe in candidates:
+                    cost = cost_per_recipe(recipe, ingredients)
+                    if cost > budget_left:
+                        continue
+                    # prefer protein recipes
+                    if is_protein(recipe):
+                        # avoid creating a 3rd distinct day if an alternative exists
+                        name = recipe["name"]
+                        adds_new_day = day not in usage_days[name]
+                        if adds_new_day and len(usage_days[name]) >= 2:
+                            # see if alternative protein exists
+                            alt_found = False
+                            for alt in candidates:
+                                if alt["name"] == name:
+                                    continue
+                                if cost_per_recipe(alt, ingredients) > budget_left:
+                                    continue
+                                if is_protein(alt):
+                                    alt_found = True
+                                    break
+                            if alt_found:
+                                continue
+                        selected = recipe
                         break
-                    elif not is_protein(recipe):
-                        day_meals.append(recipe)
-                        budget_left -= cost
-                        break
+
+            # if still not selected, pick cheapest candidate that fits budget and doesn't violate diversity when possible
+            if selected is None:
+                for recipe in candidates:
+                    cost = cost_per_recipe(recipe, ingredients)
+                    if cost > budget_left:
+                        continue
+                    name = recipe["name"]
+                    adds_new_day = day not in usage_days[name]
+                    if adds_new_day and len(usage_days[name]) >= 2:
+                        # look for alternative; if exists, skip this recipe to improve diversity
+                        alt_found = False
+                        for alt in candidates:
+                            if alt["name"] == name:
+                                continue
+                            if cost_per_recipe(alt, ingredients) > budget_left:
+                                continue
+                            alt_found = True
+                            break
+                        if alt_found:
+                            continue
+                    selected = recipe
+                    break
+
+            if selected:
+                day_meals.append(selected)
+                sel_name = selected["name"]
+                usage_days[sel_name].add(day)
+                budget_left -= cost_per_recipe(selected, ingredients)
+                if is_protein(selected):
+                    proteins_added += 1
+
         plan.append(day_meals)
 
-    return plan, round(budget_left, 2)
+    # lightweight backtracking: for recipes used on >2 distinct days, try replacing occurrences
+    remaining_budget = budget_left
+    occurrence_days = {name: set(days) for name, days in usage_days.items()}
+
+    # iterate over overused recipes and try to replace occurrences
+    for name, days in list(occurrence_days.items()):
+        while len(days) > 2:
+            replaced = False
+            # try each day where this recipe appears
+            for day_idx in sorted(days):
+                # find positions in that day's meals where this recipe is used
+                positions = [i for i, m in enumerate(plan[day_idx]) if m["name"] == name]
+                if not positions:
+                    # should not happen, but guard
+                    continue
+                pos = positions[0]
+                orig_recipe = plan[day_idx][pos]
+                orig_cost = cost_per_recipe(orig_recipe, ingredients)
+
+                # try alternatives sorted by cost
+                for alt in sorted(recipes, key=lambda r: cost_per_recipe(r, ingredients)):
+                    alt_name = alt["name"]
+                    if alt_name == name:
+                        continue
+                    alt_cost = cost_per_recipe(alt, ingredients)
+                    # would replacing keep budget non-negative?
+                    if alt_cost > orig_cost + remaining_budget:
+                        continue
+                    # would alt be used on more than 2 days after replacement?
+                    alt_days = occurrence_days.get(alt_name, set())
+                    adds_new_day = day_idx not in alt_days
+                    if adds_new_day and len(alt_days) >= 2:
+                        continue
+                    # preserve protein requirement: after replacement, the day should still have at least one protein
+                    day_other_meals = [m for i, m in enumerate(plan[day_idx]) if i != pos]
+                    has_protein = any(is_protein(m) for m in day_other_meals)
+                    if not has_protein and not is_protein(alt):
+                        continue
+
+                    # perform replacement
+                    plan[day_idx][pos] = alt
+
+                    # update occurrence sets
+                    # remove day from original name if no other meal of that day uses it
+                    still_on_day = any(m["name"] == name for m in plan[day_idx])
+                    if not still_on_day:
+                        occurrence_days[name].remove(day_idx)
+                    # add day to alt occurrence
+                    occurrence_days.setdefault(alt_name, set()).add(day_idx)
+
+                    # update remaining budget
+                    remaining_budget = remaining_budget + orig_cost - alt_cost
+                    days = occurrence_days[name]
+                    replaced = True
+                    break
+
+                if replaced:
+                    break
+
+            if not replaced:
+                # cannot reduce further for this recipe
+                break
+
+    return plan, round(remaining_budget, 2)
 
 """Festgelegtes wöchentliches Budget"""
-weekly_budget = 50
+weekly_budget = 100
 weekly_plan, remaining_budget = plan_weekly_meals(recipes, ingredients, stock, weekly_budget)
 
-#Ausgabe
-for i, day in enumerate(weekly_plan, 1):
-    print(f"Tag {i}:")
-    for meal in day:
-        print("-", meal["name"])
-print(f"Budget left: {remaining_budget:.2f} €")
+"""Fehlermeldung wenn wochenbudget überschritten wird und nicht an allen Tagen 3 Mahlzeiten gewährleistet sind"""
+# Warn if remaining budget is negative or any day has fewer than 3 meals
+warning_triggered = (remaining_budget < 0 or any(len(day) < 3 for day in weekly_plan))
+
+# Check for repeated meals (>2 days) where alternatives exist that wouldn't exceed the budget
+from collections import defaultdict
+occurrence_days = defaultdict(set)
+for day_idx, day in enumerate(weekly_plan):
+    for recipe in day:
+        occurrence_days[recipe["name"]].add(day_idx)
+
+repeat_warnings = []
+for name, days in occurrence_days.items():
+    if len(days) > 2:
+        # find the original recipe object and its cost
+        orig_recipe = next((r for r in recipes if r["name"] == name), None)
+        if orig_recipe is None:
+            continue
+        orig_cost = cost_per_recipe(orig_recipe, ingredients)
+
+        # look for any alternative recipe that could replace one occurrence without exceeding budget
+        alt_exists = False
+        for alt in recipes:
+            if alt["name"] == name:
+                continue
+            alt_cost = cost_per_recipe(alt, ingredients)
+            # substitution is possible if alt_cost <= orig_cost + remaining_budget
+            if alt_cost <= orig_cost + remaining_budget:
+                alt_exists = True
+                break
+
+        if alt_exists:
+            repeat_warnings.append(f'Note: "{name}" appears on {len(days)} days. Consider replacing some occurrences — budget allows alternatives.')
+
+if warning_triggered:
+    print("Warning: The weekly budget was exceeded or not all days have 3 meals planned.")
+    print(f"Budget left: {remaining_budget:.2f} €")
+else:
+    # Print repeat warnings (if any) before the plan
+    for w in repeat_warnings:
+        print(w)
+
+    #Ausgabe
+    for i, day in enumerate(weekly_plan, 1):
+        print(f"Tag {i}:")
+        for meal in day:
+            print("-", meal["name"])
+    print(f"Budget left: {remaining_budget:.2f} €")
