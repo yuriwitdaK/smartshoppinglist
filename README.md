@@ -8,3 +8,7 @@ i actually came across this problem where it just gives me the cheapest option w
 
 i might motivate myself for this project actually only eating what it suggests me
 15.10.2025
+
+i need it to put out an error message instead of empty days
+it would be cool if it adds saved budget automatically to next weeks budget
+also there should be a monthly recap and a saved total
