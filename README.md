@@ -17,3 +17,5 @@ i added more recipes , an error message if the budget is exceedet and i forced m
 
 ---i`ll need to take a look at the items in stock dictionairy and get the recipe function to properly work together,while doing that i should take a look at the suggestion algorithm to also include and value using items in stock maybe even try to also add an algorythm to evaluate the best days for shopping---
 15.10.2025
+
+---i`m continously running into issues with the stock dicionairy, i need to add breakfast recipes---
