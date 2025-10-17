@@ -19,3 +19,17 @@ i added more recipes , an error message if the budget is exceedet and i forced m
 15.10.2025
 
 ---i`m continously running into issues with the stock dicionairy, i need to add breakfast recipes---
+
+17.10.25
+---breakfast addet--- ---made it a soft commitment--- ---calories added,calories per day output--- ---recipe suggestion algorithm updated now half pricing/ half is it good for mealprepping and how many calories does it have---
+
+still need to fix stock logic but overall i got a pretty effective tool now!
+
+---had a lot of trouble with the sugggestion algorithm almost got it messed up again it really wanted me to eat 3 omelettes on a sunday---
+
+made a differennce between weekend and weekday recipes
+started savings algorithm
+
+---to do---
+!!!!!!!!fix stock logic!!!!!!!!!!!!!!
+!!!!!!!!savings algorithm!!!!!!!!!!!
