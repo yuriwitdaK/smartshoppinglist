@@ -33,3 +33,13 @@ started savings algorithm
 ---to do---
 !!!!!!!!fix stock logic!!!!!!!!!!!!!!
 !!!!!!!!savings algorithm!!!!!!!!!!!
+
+stock logic fixed! :) had a pretty good idea for the savings algorithm and guess what -ran into some issues, never the less, added a calendar, reworked recipe suggestion in terms of breakfast added stock to the output tiny fix at the recipe algorithm i dont cook lasagna for breakfaast
+
+18.10.25
+--to do--
+!!!!!!!!!savings logic!!!!!!!
+!!!!!!!!savings output!!!!!!!!
+!!!!!!! integrate leftover logic!!!!!!
+
+guess what !!!!!!!!!!!!rework suggestion algortithm what do you mean cook lasagna for breakfast!!!!!!
