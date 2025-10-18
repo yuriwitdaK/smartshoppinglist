@@ -186,6 +186,36 @@ stock = [{}]
 # diagnostic flag: when True print per-meal per-ingredient kcal breakdown
 DEBUG_KCAL = False
 
+# persistence helpers: load/save stock JSON
+def load_stock(path="data/stock.json"):
+    import json, os
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_stock(stock, path="data/stock.json"):
+    import json, os
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(stock, f, ensure_ascii=False, indent=2)
+
+
+def load_savings(path="data/savings.json"):
+    import json, os
+    if not os.path.exists(path):
+        return {"balance": 0.0}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_savings(savings, path="data/savings.json"):
+    import json, os
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(savings, f, ensure_ascii=False, indent=2)
+
 def is_protein(recipe):
     """Überprüft ob es dich buff machen wird"""
     # match keys used in `ingredients` dict
@@ -266,6 +296,9 @@ def plan_weekly_meals(recipes, ingredients, stock, weekly_budget):
     for day in range(7):
         day_meals = []
         proteins_added = 0
+        # track number of breakfast recipes already scheduled for this day
+        # (enforces at most 2 breakfast recipes per day)
+        breakfast_count = 0
         # track breakfast recipes used earlier in this week to encourage variety
         if 'breakfast_used_names' not in locals():
             breakfast_used_names = set()
@@ -340,6 +373,16 @@ def plan_weekly_meals(recipes, ingredients, stock, weekly_budget):
                             breakfast_nonused_exists = True
                             break
                 for recipe in candidates:
+                    # never allow more than 2 breakfast recipes in a single day
+                    if recipe.get('is_breakfast') and breakfast_count >= 2:
+                        continue
+                    # if breakfast recipe has a long prep time, only allow on weekends or
+                    # when stock contains leftovers for any of the recipe's ingredients
+                    if recipe.get('is_breakfast') and recipe.get('prep_time', 0) > 30:
+                        weekend_ok = (day >= 5)
+                        stock_ok = any(stock.get(ing, 0) > 0 for ing in recipe.get('ingredients', {}))
+                        if not (weekend_ok or stock_ok):
+                            continue
                     cost = cost_per_recipe(recipe, ingredients)
                     if cost > budget_left:
                         continue
@@ -378,6 +421,15 @@ def plan_weekly_meals(recipes, ingredients, stock, weekly_budget):
             # if still not selected, pick cheapest candidate that fits budget and doesn't violate diversity when possible
             if selected is None:
                 for recipe in candidates:
+                    # never allow more than 2 breakfast recipes in a single day
+                    if recipe.get('is_breakfast') and breakfast_count >= 2:
+                        continue
+                    # long-prep breakfasts only on weekend or when leftovers exist in stock
+                    if recipe.get('is_breakfast') and recipe.get('prep_time', 0) > 30:
+                        weekend_ok = (day >= 5)
+                        stock_ok = any(stock.get(ing, 0) > 0 for ing in recipe.get('ingredients', {}))
+                        if not (weekend_ok or stock_ok):
+                            continue
                     cost = cost_per_recipe(recipe, ingredients)
                     if cost > budget_left:
                         continue
@@ -475,6 +527,9 @@ def plan_weekly_meals(recipes, ingredients, stock, weekly_budget):
                 # record breakfast usage for variety
                 if meal == 0 and selected.get('is_breakfast'):
                     breakfast_used_names.add(sel_name)
+                # increment breakfast_count if this meal is a breakfast recipe
+                if selected.get('is_breakfast'):
+                    breakfast_count += 1
 
         plan.append(day_meals)
 
@@ -518,21 +573,64 @@ def plan_weekly_meals(recipes, ingredients, stock, weekly_budget):
                         continue
 
                     # perform replacement
-                    plan[day_idx][pos] = alt
+                        plan[day_idx][pos] = alt
 
-                    # update occurrence sets
-                    # remove day from original name if no other meal of that day uses it
-                    still_on_day = any(m["name"] == name for m in plan[day_idx])
-                    if not still_on_day:
-                        occurrence_days[name].remove(day_idx)
-                    # add day to alt occurrence
-                    occurrence_days.setdefault(alt_name, set()).add(day_idx)
+                        # update occurrence sets for this replacement
+                        still_on_day = any(m["name"] == name for m in plan[day_idx])
+                        if not still_on_day:
+                            occurrence_days[name].remove(day_idx)
+                        occurrence_days.setdefault(alt_name, set()).add(day_idx)
 
-                    # update remaining budget
-                    remaining_budget = remaining_budget + orig_cost - alt_cost
-                    days = occurrence_days[name]
-                    replaced = True
-                    break
+                        # update remaining budget for this substitution
+                        remaining_budget = remaining_budget + orig_cost - alt_cost
+
+                        # CLEANUP: if the original recipe was an origin for reserved future slots,
+                        # clear those reservations and try to replace the corresponding planned meals
+                        if 'reserved_slots' in locals():
+                            keys_to_clear = [k for k, v in list(reserved_slots.items()) if v.get('origin') == day_idx and v.get('recipe', {}).get('name') == name]
+                            for key in keys_to_clear:
+                                # remove reservation mapping
+                                reserved_entry = reserved_slots.pop(key, None)
+                                future_day, future_meal = key
+                                # ensure future_day is within planned range and the plan actually contains the reserved recipe
+                                if 0 <= future_day < len(plan) and future_meal < len(plan[future_day]):
+                                    future_orig = plan[future_day][future_meal]
+                                    if future_orig.get('name') == name:
+                                        # attempt to find a replacement for that future slot
+                                        fut_orig_cost = cost_per_recipe(future_orig, ingredients)
+                                        replaced_future = False
+                                        for fut_alt in sorted(recipes, key=lambda r: cost_per_recipe(r, ingredients)):
+                                            if fut_alt['name'] == name:
+                                                continue
+                                            fut_alt_cost = cost_per_recipe(fut_alt, ingredients)
+                                            # check budget allowance
+                                            if fut_alt_cost > fut_orig_cost + remaining_budget:
+                                                continue
+                                            # avoid creating >2 distinct days for fut_alt
+                                            fut_alt_days = occurrence_days.get(fut_alt['name'], set())
+                                            adds_new = future_day not in fut_alt_days
+                                            if adds_new and len(fut_alt_days) >= 2:
+                                                continue
+                                            # preserve protein requirement on that day
+                                            other_meals = [m for i, m in enumerate(plan[future_day]) if i != future_meal]
+                                            if not any(is_protein(m) for m in other_meals) and not is_protein(fut_alt):
+                                                continue
+                                            # perform replacement for future slot
+                                            plan[future_day][future_meal] = fut_alt
+                                            # update occurrence sets
+                                            still_on_future_day = any(m['name'] == name for m in plan[future_day])
+                                            if not still_on_future_day:
+                                                occurrence_days[name].discard(future_day)
+                                            occurrence_days.setdefault(fut_alt['name'], set()).add(future_day)
+                                            # update remaining budget
+                                            remaining_budget = remaining_budget + fut_orig_cost - fut_alt_cost
+                                            replaced_future = True
+                                            break
+                                        # if no replacement found, leave future meal as-is but reservation cleared
+
+                        days = occurrence_days[name]
+                        replaced = True
+                        break
 
                 if replaced:
                     break
@@ -544,8 +642,11 @@ def plan_weekly_meals(recipes, ingredients, stock, weekly_budget):
     return plan, round(remaining_budget, 2)
 
 """Festgelegtes wöchentliches Budget"""
+# load persistent stock (if available) and then plan
+stock = load_stock()
 weekly_budget = 100
 weekly_plan, remaining_budget = plan_weekly_meals(recipes, ingredients, stock, weekly_budget)
+
 
 
 def simulate_month(recipes, ingredients, stock, base_weekly_budget, weeks=4):
@@ -587,6 +688,114 @@ def print_month_calendar(calendar, total_saved):
                 day_prep += m.get("prep_time", 0)
             print(f"  Day {d}: { [m['name'] for m in day]} (kcal: {int(day_kcal)}, prep: {int(day_prep)}min)")
     print(f"Total saved during month: {total_saved:.2f} €")
+
+# After defining simulate_month and printing helpers, run a monthly simulation and persist savings
+savings = load_savings()
+calendar, month_saved = simulate_month(recipes, ingredients, stock, weekly_budget, weeks=4)
+if month_saved > 0:
+    savings['balance'] = savings.get('balance', 0.0) + month_saved
+    save_savings(savings)
+money_saved_total = month_saved
+
+
+def add_leftovers_to_stock(stock, weekly_plan, ingredients):
+    """Compute purchased package counts for all ingredients used in the weekly_plan,
+    subtract used amounts and add leftovers (per-ingredient) into the stock dict.
+
+    stock is expected to be a dict mapping ingredient -> leftover_amount (same units as recipe amounts).
+    If stock is a list or contains older structure, this function will try to merge sensibly.
+    """
+    # flatten stock to a dict
+    if isinstance(stock, list) and stock:
+        base_stock = {}
+        for s in stock:
+            if isinstance(s, dict):
+                for k, v in s.items():
+                    base_stock[k] = base_stock.get(k, 0) + v
+    elif isinstance(stock, dict):
+        base_stock = dict(stock)
+    else:
+        base_stock = {}
+
+    # sum usage across the week
+    usage = {}
+    for day in weekly_plan:
+        for recipe in day:
+            for ing, amt in recipe.get('ingredients', {}).items():
+                usage[ing] = usage.get(ing, 0) + amt
+
+    leftovers = {}
+    for ing, used_amt in usage.items():
+        meta = ingredients.get(ing)
+        if not meta:
+            # unknown ingredient; skip
+            continue
+        pkg = meta.get('weight', 0)
+        if pkg <= 0:
+            # no package info, assume exact usage
+            leftovers_amt = 0
+        else:
+            import math
+            packages_needed = math.ceil(max(0, used_amt - base_stock.get(ing, 0)) / pkg) if used_amt > base_stock.get(ing, 0) else 0
+            purchased = packages_needed * pkg
+            remaining_after_use = base_stock.get(ing, 0) + purchased - used_amt
+            leftovers_amt = max(0, remaining_after_use)
+
+        if leftovers_amt > 0:
+            leftovers[ing] = leftovers_amt
+
+    # merge leftovers into stock (as dict)
+    new_stock = dict(base_stock)
+    for k, v in leftovers.items():
+        new_stock[k] = new_stock.get(k, 0) + v
+
+    # prefer to return a dict for stock
+    return new_stock
+
+
+def compute_daily_leftovers(initial_stock, weekly_plan, ingredients):
+    """Simulate day-by-day consumption and return per-day leftover snapshots and final stock.
+
+    For each day, consume recipe ingredient amounts from stock where possible. If stock
+    doesn't cover an amount, buy whole packages (using ingredients[ing]['weight']) and
+    then consume. Returns (daily_leftovers_list, final_stock_dict).
+    """
+    import math
+    # flatten initial stock
+    if isinstance(initial_stock, list) and initial_stock:
+        base_stock = {}
+        for s in initial_stock:
+            if isinstance(s, dict):
+                for k, v in s.items():
+                    base_stock[k] = base_stock.get(k, 0) + v
+    elif isinstance(initial_stock, dict):
+        base_stock = dict(initial_stock)
+    else:
+        base_stock = {}
+
+    daily_leftovers = []
+
+    for day in weekly_plan:
+        # consume each recipe's ingredients
+        for recipe in day:
+            for ing, amt in recipe.get('ingredients', {}).items():
+                available = base_stock.get(ing, 0)
+                if available >= amt:
+                    base_stock[ing] = available - amt
+                    continue
+                # need to purchase
+                needed = amt - available
+                pkg = ingredients.get(ing, {}).get('weight', 0) or needed
+                packages_needed = math.ceil(needed / pkg) if pkg > 0 else 0
+                purchased = packages_needed * pkg
+                base_stock[ing] = available + purchased - amt
+        # snapshot: include only positive leftovers
+        snapshot = {k: v for k, v in base_stock.items() if v > 0}
+        daily_leftovers.append(snapshot)
+
+    final_stock = {k: v for k, v in base_stock.items() if v > 0}
+    return daily_leftovers, final_stock
+
 
 """Fehlermeldung wenn wochenbudget überschritten wird und nicht an allen Tagen 3 Mahlzeiten gewährleistet sind"""
 # Warn if remaining budget is negative or any day has fewer than 3 meals
@@ -645,6 +854,35 @@ else:
         print(w)
 
     #Ausgabe
+    # compute daily leftovers and final stock
+    daily_leftovers, final_stock = compute_daily_leftovers(stock, weekly_plan, ingredients)
+    print("\nPer-day leftovers:")
+    for i, leftovers in enumerate(daily_leftovers, 1):
+        print(f"Day {i} leftovers: {leftovers}")
+
+    print("\nFinal stock dictionary:")
+    print(final_stock)
+    # persist final stock to disk so leftovers survive across runs
+    try:
+        save_stock(final_stock)
+        print("Final stock saved to data/stock.json")
+    except Exception as e:
+        print(f"Warning: failed to save stock: {e}")
+
+    # Print monthly savings summary (money saved this simulated month and persistent balance)
+    try:
+        print(f"\nMoney saved this month (simulated): {money_saved_total:.2f} €")
+        current_balance = savings.get('balance', 0.0)
+        print(f"Persistent savings balance: {current_balance:.2f} €")
+    except Exception:
+        # if simulation or savings are not available, skip printing
+        pass
+
+    # compute date labels for the current week (starting today)
+    from datetime import date, timedelta
+    today = date.today()
+    week_dates = [today + timedelta(days=i) for i in range(7)]
+
     for i, day in enumerate(weekly_plan, 1):
         day_kcal = sum(kcal_per_recipe(m, ingredients) for m in day)
         # compute prep time (count each recipe once per day)
@@ -655,7 +893,8 @@ else:
                 continue
             seen.add(m["name"])
             day_prep += m.get("prep_time", 0)
-        print(f"Tag {i}: (kcal total: {int(day_kcal)}, prep_time: {int(day_prep)} min)")
+        date_label = week_dates[i-1].strftime("%Y-%m-%d (%a)")
+        print(f"Tag {i} - {date_label}: (kcal total: {int(day_kcal)}, prep_time: {int(day_prep)} min)")
         for meal in day:
             print("-", meal["name"]) 
         # debug per-meal kcal breakdown
