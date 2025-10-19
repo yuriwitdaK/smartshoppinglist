@@ -34,7 +34,7 @@ started savings algorithm
 !!!!!!!!fix stock logic!!!!!!!!!!!!!!
 !!!!!!!!savings algorithm!!!!!!!!!!!
 
-stock logic fixed! :) had a pretty good idea for the savings algorithm and guess what -ran into some issues, never the less, added a calendar, reworked recipe suggestion in terms of breakfast added stock to the output tiny fix at the recipe algorithm i dont cook lasagna for breakfaast
+stock logic fixed! :) had a pretty good idea for the savings algorithm and guess what -ran into some issues, never the less, added a calendar, reworked recipe suggestion in terms of breakfast added stock to the output tiny fix at the recipe algorithm i dont cook lasagna for breakfast
 
 18.10.25
 --to do--
@@ -43,3 +43,15 @@ stock logic fixed! :) had a pretty good idea for the savings algorithm and guess
 !!!!!!! integrate leftover logic!!!!!!
 
 guess what !!!!!!!!!!!!rework suggestion algortithm what do you mean cook lasagna for breakfast!!!!!!
+
+19.10.2025
+issue might not even be suggestion algorithm,i thougt making the 3 meals a day one list would do the job but i should rather make 3 seperate lists Breakfaast, Lunch, Dinner and work on seperate restrictions.
+
+fixing savings logic in progress
+
+savings output still unrealisticly high because of fictional monthly recap,should just cut it out
+
+---to do--- del fictional recap
+---create seperate lists for all meals
+--- add more recipes---
+integrate leftover logic, expiration logic implement warning, food expiring is bad for wallet and environment
