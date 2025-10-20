@@ -55,3 +55,5 @@ savings output still unrealisticly high because of fictional monthly recap,shoul
 ---create seperate lists for all meals
 --- add more recipes---
 integrate leftover logic, expiration logic implement warning, food expiring is bad for wallet and environment
+ro
+---improving writeup---
