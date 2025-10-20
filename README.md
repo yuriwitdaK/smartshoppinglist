@@ -51,9 +51,14 @@ fixing savings logic in progress
 
 savings output still unrealisticly high because of fictional monthly recap,should just cut it out
 
+
+
 ---to do--- del fictional recap
 ---create seperate lists for all meals
 --- add more recipes---
 integrate leftover logic, expiration logic implement warning, food expiring is bad for wallet and environment
 ro
+
+
 ---improving writeup---
+---explain functions in detail explain arguments and positioning---
