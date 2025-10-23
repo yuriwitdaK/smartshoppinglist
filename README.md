@@ -62,3 +62,6 @@ ro
 
 ---improving writeup---
 ---explain functions in detail explain arguments and positioning---
+
+---brainstorm---
+22.10.25
