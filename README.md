@@ -65,3 +65,6 @@ ro
 
 ---brainstorm---
 22.10.25
+
+23.10.25
+imported streamlit, started working on interface
